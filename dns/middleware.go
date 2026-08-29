@@ -1,12 +1,15 @@
 package dns
 
 import (
+	"net"
 	"net/netip"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/metacubex/mihomo/common/lru"
 	"github.com/metacubex/mihomo/component/fakeip"
+	"github.com/metacubex/mihomo/component/process"
 	"github.com/metacubex/mihomo/component/resolver"
 	C "github.com/metacubex/mihomo/constant"
 	icontext "github.com/metacubex/mihomo/context"
@@ -146,12 +149,85 @@ func withMapping(mapping *lru.LruCache[netip.Addr, string]) middleware {
 	}
 }
 
-func withFakeIP(skipper *fakeip.Skipper, fakePool *fakeip.Pool, fakePool6 *fakeip.Pool, fakeIPTTL int) middleware {
+// procCacheKey 进程反查缓存键（源 IP + 源端口）
+type procCacheKey struct {
+	ip   netip.Addr
+	port uint16
+}
+
+// dnsSrcAddr 从 DNS context 取查询源地址
+func dnsSrcAddr(ctx *icontext.DNSContext) net.Addr {
+	if v := ctx.Value(srcAddrKey{}); v != nil {
+		if addr, ok := v.(net.Addr); ok {
+			return addr
+		}
+	}
+	return nil
+}
+
+// parseSrcAddr 解析源地址为 (srcIP, srcPort)
+func parseSrcAddr(addr net.Addr) (netip.Addr, uint16, bool) {
+	switch a := addr.(type) {
+	case *net.UDPAddr:
+		ip, ok := netip.AddrFromSlice(a.IP)
+		if !ok {
+			return netip.Addr{}, 0, false
+		}
+		return ip.Unmap(), uint16(a.Port), true
+	case *net.TCPAddr:
+		ip, ok := netip.AddrFromSlice(a.IP)
+		if !ok {
+			return netip.Addr{}, 0, false
+		}
+		return ip.Unmap(), uint16(a.Port), true
+	}
+	return netip.Addr{}, 0, false
+}
+
+// shouldSkipByProcess 判断 DNS 查询来源进程是否在排除列表中（命中则跳过 fake-ip，返回真实 IP）
+func shouldSkipByProcess(ctx *icontext.DNSContext, excludeProcesses []string, cache *lru.LruCache[procCacheKey, string]) bool {
+	addr := dnsSrcAddr(ctx)
+	if addr == nil {
+		return false
+	}
+	srcIP, srcPort, ok := parseSrcAddr(addr)
+	if !ok {
+		return false
+	}
+	key := procCacheKey{ip: srcIP, port: srcPort}
+	if name, hit := cache.Get(key); hit {
+		return matchProcess(name, excludeProcesses)
+	}
+	_, path, err := process.FindProcessName(process.UDP, srcIP, int(srcPort))
+	if err != nil {
+		return false
+	}
+	name := filepath.Base(path)
+	cache.Set(key, name)
+	return matchProcess(name, excludeProcesses)
+}
+
+// matchProcess 进程名匹配（Windows 进程名不区分大小写）
+func matchProcess(name string, excludeProcesses []string) bool {
+	name = strings.ToLower(name)
+	for _, p := range excludeProcesses {
+		if strings.ToLower(filepath.Base(p)) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func withFakeIP(skipper *fakeip.Skipper, fakePool *fakeip.Pool, fakePool6 *fakeip.Pool, fakeIPTTL int, excludeProcesses []string, procCache *lru.LruCache[procCacheKey, string]) middleware {
 	return func(next handler) handler {
 		return func(ctx *icontext.DNSContext, r *D.Msg) (*D.Msg, error) {
 			q := r.Question[0]
 
 			host := strings.TrimRight(q.Name, ".")
+			// 按进程排除 fake-ip：指定进程的 DNS 查询返回真实 IP，配合 route-address 让其流量绕过 TUN
+			if len(excludeProcesses) > 0 && shouldSkipByProcess(ctx, excludeProcesses, procCache) {
+				return next(ctx, r)
+			}
 			if skipper.ShouldSkipped(host) {
 				return next(ctx, r)
 			}
@@ -238,7 +314,7 @@ func newHandler(resolver resolver.Resolver, mapper *ResolverEnhancer) handler {
 	}
 
 	if mapper.mode == C.DNSFakeIP {
-		middlewares = append(middlewares, withFakeIP(mapper.fakeIPSkipper, mapper.fakeIPPool, mapper.fakeIPPool6, mapper.fakeIPTTL))
+		middlewares = append(middlewares, withFakeIP(mapper.fakeIPSkipper, mapper.fakeIPPool, mapper.fakeIPPool6, mapper.fakeIPTTL, mapper.excludeProcesses, mapper.procCache))
 	}
 
 	if mapper.mode != C.DNSNormal {

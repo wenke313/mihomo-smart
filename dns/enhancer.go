@@ -10,14 +10,16 @@ import (
 )
 
 type ResolverEnhancer struct {
-	ipv6          bool
-	mode          C.DNSMode
-	fakeIPPool    *fakeip.Pool
-	fakeIPPool6   *fakeip.Pool
-	fakeIPSkipper *fakeip.Skipper
-	fakeIPTTL     int
-	mapping       *lru.LruCache[netip.Addr, string]
-	useHosts      bool
+	ipv6             bool
+	mode             C.DNSMode
+	fakeIPPool       *fakeip.Pool
+	fakeIPPool6      *fakeip.Pool
+	fakeIPSkipper    *fakeip.Skipper
+	fakeIPTTL        int
+	mapping          *lru.LruCache[netip.Addr, string]
+	useHosts         bool
+	excludeProcesses []string
+	procCache        *lru.LruCache[procCacheKey, string]
 }
 
 func (h *ResolverEnhancer) FakeIPEnabled() bool {
@@ -159,20 +161,22 @@ func (h *ResolverEnhancer) StoreFakePoolState() {
 }
 
 type EnhancerConfig struct {
-	IPv6          bool
-	EnhancedMode  C.DNSMode
-	FakeIPPool    *fakeip.Pool
-	FakeIPPool6   *fakeip.Pool
-	FakeIPSkipper *fakeip.Skipper
-	FakeIPTTL     int
-	UseHosts      bool
+	IPv6             bool
+	EnhancedMode     C.DNSMode
+	FakeIPPool       *fakeip.Pool
+	FakeIPPool6      *fakeip.Pool
+	FakeIPSkipper    *fakeip.Skipper
+	FakeIPTTL        int
+	UseHosts         bool
+	ExcludeProcesses []string
 }
 
 func NewEnhancer(cfg EnhancerConfig) *ResolverEnhancer {
 	e := &ResolverEnhancer{
-		ipv6:     cfg.IPv6,
-		mode:     cfg.EnhancedMode,
-		useHosts: cfg.UseHosts,
+		ipv6:             cfg.IPv6,
+		mode:             cfg.EnhancedMode,
+		useHosts:         cfg.UseHosts,
+		excludeProcesses: cfg.ExcludeProcesses,
 	}
 
 	if cfg.EnhancedMode != C.DNSNormal {
@@ -186,6 +190,11 @@ func NewEnhancer(cfg EnhancerConfig) *ResolverEnhancer {
 			e.fakeIPTTL = 1
 		}
 		e.mapping = lru.New(lru.WithSize[netip.Addr, string](4096))
+	}
+
+	// 进程反查缓存（按进程排除 fake-ip 用），TTL 8s，容量 1024
+	if len(cfg.ExcludeProcesses) > 0 {
+		e.procCache = lru.New[procCacheKey, string](lru.WithAge[procCacheKey, string](8), lru.WithSize[procCacheKey, string](1024))
 	}
 
 	return e
