@@ -278,14 +278,15 @@ func updateDNS(c *config.DNS, generalIPv6 bool) {
 		CacheRoundRobin:      c.CacheRoundRobin,
 	})
 	m := dns.NewEnhancer(dns.EnhancerConfig{
-		IPv6:          ipv6,
-		EnhancedMode:  c.EnhancedMode,
-		FakeIPPool:    c.FakeIPPool,
-		FakeIPPool6:   c.FakeIPPool6,
-		FakeIPSkipper: c.FakeIPSkipper,
-		FakeIPTTL:     c.FakeIPTTL,
-		MaxSize:       c.CacheMaxSize,
-		UseHosts:      c.UseHosts,
+		IPv6:             ipv6,
+		EnhancedMode:     c.EnhancedMode,
+		FakeIPPool:       c.FakeIPPool,
+		FakeIPPool6:      c.FakeIPPool6,
+		FakeIPSkipper:    c.FakeIPSkipper,
+		FakeIPTTL:        c.FakeIPTTL,
+		MaxSize:          c.CacheMaxSize,
+		UseHosts:         c.UseHosts,
+		ExcludeProcesses: c.FakeIPExcludeProcess,
 	})
 
 	// reuse cache of old host mapper

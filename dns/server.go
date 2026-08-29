@@ -19,6 +19,10 @@ var (
 	dnsDefaultTTL uint32 = 600
 )
 
+// srcAddrKey 用于在 DNS context 中透传查询源地址（net.Addr），
+// 供 withFakeIP 按进程排除 fake-ip 时反查进程使用
+type srcAddrKey struct{}
+
 type Server struct {
 	service   resolver.Service
 	tcpServer *D.Server
@@ -27,7 +31,8 @@ type Server struct {
 
 // ServeDNS implement D.Handler ServeDNS
 func (s *Server) ServeDNS(w D.ResponseWriter, r *D.Msg) {
-	msg, err := s.service.ServeMsg(context.Background(), r)
+	ctx := context.WithValue(context.Background(), srcAddrKey{}, w.RemoteAddr())
+	msg, err := s.service.ServeMsg(ctx, r)
 	if err != nil {
 		m := new(D.Msg)
 		m.SetRcode(r, D.RcodeServerFailure)

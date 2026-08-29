@@ -181,6 +181,7 @@ type DNS struct {
 	FakeIPRange6          netip.Prefix
 	FakeIPPool6           *fakeip.Pool
 	FakeIPSkipper         *fakeip.Skipper
+	FakeIPExcludeProcess  []string
 	FakeIPTTL             int
 	NameServerPolicy      []dns.Policy
 	ProxyServerNameserver []dns.NameServer
@@ -251,6 +252,7 @@ type RawDNS struct {
 	FakeIPRange                  string                              `yaml:"fake-ip-range" json:"fake-ip-range"`
 	FakeIPRange6                 string                              `yaml:"fake-ip-range6" json:"fake-ip-range6"`
 	FakeIPFilter                 []string                            `yaml:"fake-ip-filter" json:"fake-ip-filter"`
+	FakeIPExcludeProcess         []string                            `yaml:"fake-ip-exclude-process" json:"fake-ip-exclude-process"`
 	FakeIPFilterMode             C.FilterMode                        `yaml:"fake-ip-filter-mode" json:"fake-ip-filter-mode"`
 	FakeIPTTL                    int                                 `yaml:"fake-ip-ttl" json:"fake-ip-ttl"`
 	DefaultNameserver            []string                            `yaml:"default-nameserver" json:"default-nameserver"`
@@ -1569,6 +1571,7 @@ func parseDNS(rawCfg *RawConfig, ruleProviders map[string]P.RuleProvider) (*DNS,
 		}
 
 		dnsCfg.FakeIPSkipper = skipper
+		dnsCfg.FakeIPExcludeProcess = cfg.FakeIPExcludeProcess
 		dnsCfg.FakeIPTTL = cfg.FakeIPTTL
 
 		if dnsCfg.FakeIPRange.IsValid() {
