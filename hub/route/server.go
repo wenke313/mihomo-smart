@@ -148,6 +148,7 @@ func router(isDebug bool, secret string, dohServer string, cors Cors) *chi.Mux {
 			fs := http.StripPrefix("/ui", http.FileServer(http.Dir(uiPath)))
 			r.Get("/ui", http.RedirectHandler("/ui/", http.StatusTemporaryRedirect).ServeHTTP)
 			r.Get("/ui/*", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", "no-cache")
 				fs.ServeHTTP(w, r)
 			})
 		})
